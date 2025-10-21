@@ -1,0 +1,1 @@
+This is a chatbot which is used to scan legal document and solve related doubts and give the meaning of each keyword 
