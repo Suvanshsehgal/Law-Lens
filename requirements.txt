@@ -1,0 +1,13 @@
+streamlit
+langchain
+openai
+faiss-cpu
+pypdf
+pytesseract
+transformers
+torch
+Pillow
+pandas
+python-dotenv
+spacy
+tqdm
