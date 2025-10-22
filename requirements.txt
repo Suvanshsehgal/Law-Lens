@@ -3,6 +3,7 @@ langchain
 openai
 faiss-cpu
 pypdf
+pdf2image
 pytesseract
 transformers
 torch
