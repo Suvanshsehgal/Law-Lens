@@ -1,9 +1,9 @@
 import os
-import pytesseract
+import pytesseract  # type: ignore[import]
 import logging
-from pdf2image import convert_from_path, pdfinfo_from_path
+from pdf2image import convert_from_path, pdfinfo_from_path  # type: ignore[import]
 from concurrent.futures import ThreadPoolExecutor
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore[import]
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 

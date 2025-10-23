@@ -1,0 +1,2 @@
+[server]
+folderWatchBlacklist = ["C:/Users/USER ACER/AppData/Local/Programs/Python/Python312/Lib/site-packages/torch"]
