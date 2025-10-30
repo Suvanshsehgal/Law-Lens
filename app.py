@@ -7,7 +7,9 @@ except Exception:
 import streamlit as st  # type: ignore[import]
 from modules.pdf_processor import extract_text_from_pdf
 from modules.keyword import load_legalbert_model, extract_legal_keywords
-from modules.keyword_meaning import get_keywords_meaning_smart  # ✅ Updated import
+from modules.keyword_meaning import get_keywords_meaning_smart  # ✅ For keyword meanings
+from modules.vector_store import create_faiss_index  # ✅ NEW for FAISS index creation
+from modules.chatbot import answer_query_with_context  # ✅ NEW for Groq chatbot
 
 # --- Page Config ---
 st.set_page_config(page_title="Legal Document Chatbot", layout="wide")
@@ -23,7 +25,8 @@ kw_model = get_kw_model()
 st.title("📄 Legal Document Chatbot")
 st.write("""
 Upload a legal PDF document — text-based or scanned — to extract its contents, 
-identify key legal terms using **LegalBERT**, and understand their meanings through **Llama (Groq API)**.
+identify key legal terms using **LegalBERT**, understand their meanings through **Llama (Groq API)**, 
+and ask questions directly about the document using **FAISS + Llama Chat**.
 """)
 
 # --- File Upload ---
@@ -57,24 +60,37 @@ if uploaded_file:
                 with st.spinner("💬 Fetching keyword meanings intelligently..."):
                     meanings = get_keywords_meaning_smart(keywords)
 
-                # --- Display Results ---
+                # --- Display Results (only show ones needing explanation) ---
                 if isinstance(meanings, dict):
-                   for kw, meaning in meanings.items():
-                            # Only display the item if the AI provided an actual meaning
-                            if not (isinstance(meaning, str) and meaning.lower() == "no explanation needed"):
-                                st.markdown(f"**{kw}:** {meaning}")
+                    for kw, meaning in meanings.items():
+                        if not (isinstance(meaning, str) and meaning.lower() == "no explanation needed"):
+                            st.markdown(f"**{kw}:** {meaning}")
                 else:
                     st.warning("Unexpected response from Groq API. Please check your API setup.")
-
             else:
                 st.info("No keywords found. Try uploading a longer or clearer legal document.")
+
+            # --- ✅ NEW: Create FAISS Index ---
+            st.subheader("💾 Indexing Document for Chatbot")
+            with st.spinner("Creating FAISS vector index..."):
+                index, chunks = create_faiss_index(text)
+            st.success("📂 Document successfully indexed for retrieval!")
+
+            # --- ✅ NEW: Chatbot Section ---
+            st.subheader("🤖 Ask Questions About the Document")
+            user_query = st.text_input("Enter your legal question:")
+
+            if user_query:
+                with st.spinner("💭 Thinking..."):
+                    answer = answer_query_with_context(user_query, index, chunks)
+                    st.markdown(f"**Answer:** {answer}")
 
             # --- Download Extracted Text ---
             st.download_button(
                 label="⬇️ Download Full Extracted Text",
                 data=text,
                 file_name="extracted_text.txt",
-                mime="text/plain"
+                mime="text/plain"           
             )
 
         except Exception as e:
