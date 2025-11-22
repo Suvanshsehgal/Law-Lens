@@ -17,6 +17,8 @@ from modules.keyword_meaning import get_keywords_meaning_smart
 from modules.vector_store import create_faiss_index
 from modules.chatbot import answer_query_with_context
 from modules.highlight_pdf import highlight_paragraphs_in_original_pdf
+from modules.case_law_fetcher import get_cases_for_keywords
+from modules.semantic_importance import analyze_paragraphs_hybrid
 
 # --- Page Config ---
 st.set_page_config(page_title="⚖️ Law-Lens", layout="wide")
