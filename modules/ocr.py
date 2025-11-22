@@ -28,13 +28,22 @@ else:
     
 def _ocr_page(image):
     try:
-        config = "-l eng --oem 1 --psm 3"
+        # Optimized Tesseract config for speed
+        config = "-l eng --oem 1 --psm 3 -c tessedit_do_invert=0"
+        
+        # Resize large images to reduce processing time
+        width, height = image.size
+        if width > 2000 or height > 2000:
+            scale = min(2000/width, 2000/height)
+            new_size = (int(width * scale), int(height * scale))
+            image = image.resize(new_size, resample=1)  # LANCZOS
+        
         return pytesseract.image_to_string(image, config=config)
     except Exception as e:
         logging.error(f"Error processing page: {e}")
         return ""
 
-def extract_text_from_scanned_pdf(pdf_path, dpi=300):
+def extract_text_from_scanned_pdf(pdf_path, dpi=200):
     logging.info(f"Starting OCR for: {pdf_path}")
     
     try:

@@ -1,29 +1,32 @@
 import re
-from PyPDF2 import PdfReader
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+import os
+try:
+    import pypdfium2 as pdfium
+    USE_PDFIUM = True
+except ImportError:
+    from PyPDF2 import PdfReader
+    USE_PDFIUM = False
+
 from modules.ocr import extract_text_from_scanned_pdf
 
 
 # ============================================================
-#                PDF TEXT EXTRACTION (UNCHANGED)
+#                PDF TEXT EXTRACTION (OPTIMIZED)
 # ============================================================
 
 def extract_text_from_pdf(uploaded_file):
-    """Extract PDF text; fallback to OCR if needed."""
+    """Extract PDF text with optimized parallel processing; fallback to OCR if needed."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
         temp_pdf.write(uploaded_file.read())
         temp_pdf_path = temp_pdf.name
 
     try:
-        reader = PdfReader(temp_pdf_path)
-        page_texts = []
-
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                page_texts.append(page_text)
-
-        text = "\n".join(page_texts)
+        if USE_PDFIUM:
+            text = _extract_with_pdfium(temp_pdf_path)
+        else:
+            text = _extract_with_pypdf2(temp_pdf_path)
 
         # Fallback to OCR if text is empty or too short
         if not text.strip() or len(text.strip()) < 50:
@@ -31,30 +34,73 @@ def extract_text_from_pdf(uploaded_file):
 
     except Exception:
         text = extract_text_from_scanned_pdf(temp_pdf_path)
+    finally:
+        # Cleanup temp file
+        try:
+            os.unlink(temp_pdf_path)
+        except:
+            pass
 
     return clean_extracted_text(text)
 
 
+def _extract_with_pdfium(pdf_path):
+    """Fast extraction using pypdfium2 (3-5x faster than PyPDF2)."""
+    pdf = pdfium.PdfDocument(pdf_path)
+    page_texts = []
+    
+    for page_num in range(len(pdf)):
+        page = pdf[page_num]
+        textpage = page.get_textpage()
+        text = textpage.get_text_range()
+        if text:
+            page_texts.append(text)
+    
+    return "\n".join(page_texts)
+
+
+def _extract_with_pypdf2(pdf_path):
+    """Fallback extraction using PyPDF2 with parallel processing."""
+    reader = PdfReader(pdf_path)
+    num_pages = len(reader.pages)
+    
+    # Use parallel processing for large PDFs
+    if num_pages > 10:
+        max_workers = min(os.cpu_count() or 4, 8)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            page_texts = list(executor.map(lambda p: p.extract_text() or "", reader.pages))
+    else:
+        page_texts = [page.extract_text() or "" for page in reader.pages]
+    
+    return "\n".join(page_texts)
+
+
 def clean_extracted_text(text):
-    """Clean extracted PDF text before analysis."""
+    """Clean extracted PDF text before analysis (optimized with compiled regex)."""
     if not text:
         return ""
 
-    text = text.replace('\x00', '')
-    text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
-    text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', text)
-    text = re.sub(r'\n+', '\n', text)
+    # Compile regex patterns once for better performance
+    control_chars = re.compile(r'[\x00-\x1F\x7F-\x9F]')
+    spaces_tabs = re.compile(r'[ \t]+')
+    multi_newlines = re.compile(r'\n\s*\n\s*\n+')
+    hyphen_newline = re.compile(r'(\w+)-\s*\n\s*(\w+)')
+    extra_newlines = re.compile(r'\n+')
+    multi_spaces = re.compile(r'\s+')
 
-    # Remove page numbers and isolated digits
-    lines = []
-    for line in text.split("\n"):
-        if not (line.strip().isdigit() and len(line.strip()) <= 3):
-            lines.append(line.strip())
+    # Apply all regex replacements in sequence
+    text = control_chars.sub('', text)
+    text = spaces_tabs.sub(' ', text)
+    text = multi_newlines.sub('\n\n', text)
+    text = hyphen_newline.sub(r'\1\2', text)
+    text = extra_newlines.sub('\n', text)
 
+    # Remove page numbers and isolated digits (optimized)
+    lines = [line.strip() for line in text.split("\n") 
+             if not (line.strip().isdigit() and len(line.strip()) <= 3)]
+    
     text = "\n".join(lines)
-    text = re.sub(r'\s+', ' ', text)
+    text = multi_spaces.sub(' ', text)
 
     return text.strip()
 

@@ -51,9 +51,17 @@ if uploaded_file:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # -------- TEXT EXTRACTION --------
+    # -------- TEXT EXTRACTION (CACHED) --------
+    @st.cache_data
+    def cached_extract_text(file_bytes):
+        """Cache text extraction to avoid re-processing same file."""
+        import io
+        file_like = io.BytesIO(file_bytes)
+        file_like.name = uploaded_file.name
+        return extract_text_from_pdf(file_like)
+    
     with st.spinner("🔍 Extracting text from PDF..."):
-        text = extract_text_from_pdf(uploaded_file)
+        text = cached_extract_text(uploaded_file.getvalue())
 
     # -------- KEYWORD EXTRACTION --------
     with st.spinner("🧠 Identifying legal keywords..."):
