@@ -17,6 +17,7 @@ from modules.keyword_meaning import get_keywords_meaning_smart
 from modules.vector_store import create_faiss_index
 from modules.chatbot import answer_query_with_context
 from modules.highlight_pdf import highlight_paragraphs_in_original_pdf
+from modules.case_law_fetcher import get_cases_for_keywords
 
 # --- Page Config ---
 st.set_page_config(page_title="⚖️ Law-Lens", layout="wide")
@@ -70,6 +71,14 @@ if uploaded_file:
     # -------- KEYWORD MEANINGS --------
     with st.spinner("💬 Generating keyword meanings..."):
         meanings = get_keywords_meaning_smart(keywords)
+    
+    # -------- CASE LAW FETCHING --------
+    case_laws = {}
+    if keywords:
+        with st.spinner("⚖️ Fetching related Indian court cases..."):
+            case_laws = get_cases_for_keywords(keywords[:5])  # Limit to top 5 keywords
+    else:
+        st.warning("⚠️ No keywords extracted, skipping case law fetch")
 
     # -------- PARAGRAPH IMPORTANCE SCORING --------
     with st.spinner("📑 Detecting important paragraphs..."):
@@ -171,6 +180,51 @@ if uploaded_file:
             else:
                 st.warning("Please enter a valid question.")
 
+    st.divider()
+
+    # =======================================================
+    #          RELATED IPC SECTIONS & CASE LAWS
+    # =======================================================
+    st.subheader("⚖️ Related IPC Sections & Indian Court Cases")
+    st.caption("Relevant law sections for each keyword with links to all related Supreme Court and High Court cases")
+    
+    if case_laws:
+        # Display case laws in cards
+        num_cases = len(case_laws)
+        cols_per_row = 2
+        
+        case_items = list(case_laws.items())
+        for i in range(0, num_cases, cols_per_row):
+            cols = st.columns(cols_per_row)
+            
+            for j in range(cols_per_row):
+                idx = i + j
+                if idx < num_cases:
+                    keyword, (json_data, ui_text) = case_items[idx]
+                    
+                    with cols[j]:
+                        with st.container(border=True):
+                            st.markdown(f"### 🔑 {keyword.upper()}")
+                            
+                            if "error" in json_data:
+                                st.warning(f"⚠️ {json_data.get('error', 'No case found')}")
+                            else:
+                                # Case details
+                                ipc_section = json_data.get('ipc_section', 'N/A')
+                                category = json_data.get('case_category', 'N/A')
+                                summary = json_data.get('summary', 'N/A')
+                                kanoon_link = json_data.get('kanoon_link', '')
+                                
+                                st.markdown(f"**⚖️ IPC/Law Section:** {ipc_section}")
+                                st.markdown(f"**📂 Category:** {category.title()}")
+                                st.markdown(f"**📝 About:**")
+                                st.write(summary)
+                                
+                                if kanoon_link:
+                                    st.markdown(f"[🔗 View All Cases on IndianKanoon]({kanoon_link})")
+    else:
+        st.info("No case laws available. Keywords may not have been extracted or case law fetching was skipped.")
+    
     st.divider()
 
     # -------- DOWNLOAD RAW EXTRACTED TEXT --------
