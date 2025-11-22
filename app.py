@@ -11,12 +11,13 @@ import streamlit as st
 import tempfile
 import os
 
-from modules.pdf_processor import extract_text_from_pdf, prepare_paragraph_importance_data
+from modules.pdf_processor import extract_text_from_pdf, split_into_paragraphs
 from modules.keyword import load_legalbert_model, extract_legal_keywords
 from modules.keyword_meaning import get_keywords_meaning_smart
 from modules.vector_store import create_faiss_index
 from modules.chatbot import answer_query_with_context
 from modules.highlight_pdf import highlight_paragraphs_in_original_pdf
+from modules.semantic_importance import analyze_paragraphs_hybrid
 
 # --- Page Config ---
 st.set_page_config(page_title="⚖️ Law-Lens", layout="wide")
@@ -71,16 +72,29 @@ if uploaded_file:
     with st.spinner("💬 Generating keyword meanings..."):
         meanings = get_keywords_meaning_smart(keywords)
 
-    # -------- PARAGRAPH IMPORTANCE SCORING --------
-    with st.spinner("📑 Detecting important paragraphs..."):
-        # DO NOT pass extra arguments — your function expects only (text, keywords)
-        paragraph_data = prepare_paragraph_importance_data(text, keywords)
+    # -------- HYBRID PARAGRAPH IMPORTANCE SCORING --------
+    with st.spinner("🧠 Analyzing paragraphs with AI (semantic + Groq scoring)..."):
+        # Split text into paragraphs
+        paragraphs = split_into_paragraphs(text)
+        # Hybrid analysis: semantic filtering + Groq scoring
+        paragraph_data = analyze_paragraphs_hybrid(paragraphs)
 
     # -------- CHAT INDEXING --------
     with st.spinner("💾 Preparing chatbot search index..."):
         index, chunks = create_faiss_index(text)
 
+    # Show analysis summary
+    high_count = sum(1 for p in paragraph_data if p.get("importance") == "high")
+    medium_count = sum(1 for p in paragraph_data if p.get("importance") == "medium")
+    low_count = sum(1 for p in paragraph_data if p.get("importance") == "low")
+    
     st.success("✅ Document processed successfully!")
+    
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("🔴 High Priority", high_count)
+    col_b.metric("🟡 Medium Priority", medium_count)
+    col_c.metric("⚪ Low Priority", low_count)
+    
     st.divider()
 
     # -------- GENERATE HIGHLIGHTED ORIGINAL PDF --------
