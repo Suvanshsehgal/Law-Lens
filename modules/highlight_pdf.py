@@ -49,9 +49,10 @@ def token_overlap_stats(a: str, b: str) -> tuple[float, int]:
 def _pick_color(importance: str):
     """Map importance label to highlight color."""
     if importance == "high":
-        return (1, 0, 0)  # red
+        return (1, 0, 0)  # red - high priority (score 3)
     if importance == "medium":
-        return (1, 1, 0)  # yellow
+        return (1, 1, 0)  # yellow - medium priority (score 2)
+    # Low importance (score 1) returns None - no highlight
     return None
 
 
@@ -75,7 +76,7 @@ def highlight_paragraphs_in_original_pdf(
         importance = item.get("importance", "low")
         color = _pick_color(importance)
 
-        # Skip non-important paragraphs early
+        # All paragraphs get highlighted now (high=red, low=yellow)
         if color is None:
             continue
 

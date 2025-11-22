@@ -18,3 +18,5 @@ tqdm
 keybert
 sentencepiece
 groq
+sentence-transformers
+scikit-learn
