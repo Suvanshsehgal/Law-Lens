@@ -20,3 +20,6 @@ sentencepiece
 groq
 sentence-transformers
 scikit-learn
+fastapi
+uvicorn
+python-multipart
