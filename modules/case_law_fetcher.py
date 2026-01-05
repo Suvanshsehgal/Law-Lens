@@ -1,6 +1,12 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+
 import os
 import json
 import logging
+import re
+import time
 from typing import Dict, Tuple
 from groq import Groq
 
@@ -9,132 +15,161 @@ logging.basicConfig(level=logging.INFO)
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-def get_ipc_section_for_keyword(keyword: str) -> str:
+def normalize_keyword(keyword: str):
     """
-    Identify the most relevant IPC section or law for the keyword.
-    Returns IPC section number or law reference.
+    Clean raw keyword text extracted from OCR/LLM.
+    Removes underscores, numbers, extra spaces etc.
     """
-    prompt = f"""You are an Indian legal expert specializing in the Indian Penal Code (IPC) and other Indian laws.
+    if not keyword:
+        return None
 
-For the legal keyword: "{keyword}"
+    keyword = keyword.lower().strip()
 
-Identify the MOST RELEVANT IPC section or other Indian law section that relates to this keyword.
+    keyword = keyword.replace("_", " ")
+    keyword = " ".join(keyword.split())
+    keyword = re.sub(r'\d+', '', keyword)
 
-RULES:
-- If it's a criminal matter, provide IPC section (e.g., "IPC 420", "IPC 302")
-- If it's civil/contract law, provide relevant act (e.g., "Contract Act Section 73", "Sale of Goods Act Section 55")
-- If it's property law, provide relevant act (e.g., "Transfer of Property Act Section 54")
-- If no specific section applies, return "General Legal Term"
+    if len(keyword) < 3:
+        return None
 
-Respond with ONLY the section reference, nothing else.
-Examples: "IPC 420", "IPC 406", "Contract Act Section 73", "General Legal Term"
+    return keyword
 
-Your response:"""
+
+def get_ipc_section_for_keyword(keyword: str) -> Dict:
+    """
+    Uses LLM to identify the most relevant legal section for a keyword.
+    Returns structured JSON (section, category, summary)
+    """
+
+    cleaned = normalize_keyword(keyword)
+
+    if not cleaned:
+        logging.warning(f"Keyword '{keyword}' became invalid after cleaning.")
+        cleaned = keyword
+
+    prompt = f"""
+You are a senior Indian legal expert.
+
+For the keyword: "{cleaned}"
+
+Identify the MOST relevant Indian law section.
+
+Prefer:
+- Indian Penal Code (IPC)
+- Transfer of Property Act
+- Rent Control Acts
+- Contract Act
+- Consumer Protection Act
+- IT Act
+- CrPC / CPC
+
+Rules:
+- DO NOT invent fake sections
+- ONLY provide real Indian legal acts
+- If unsure, choose the safest commonly applicable section
+- Return STRICT JSON ONLY
+
+Respond in this format ONLY:
+
+{{
+ "section": "Act Name Section Number",
+ "law_type": "criminal | civil | rent | property | contract | consumer | general",
+ "summary": "short 1-2 line meaning of this section"
+}}
+"""
 
     try:
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=50
+            max_tokens=300
         )
-        
-        ipc_section = response.choices[0].message.content.strip()
-        logging.info(f"IPC section for '{keyword}': {ipc_section}")
-        return ipc_section
-        
+
+        data = json.loads(response.choices[0].message.content)
+
+        ipc_section = data.get("section", "General Legal Term")
+        category = data.get("law_type", "general")
+        summary = data.get("summary", "Relevant legal section.")
+
+        logging.info(f"Mapped '{keyword}' → {ipc_section}")
+
+        return {
+            "keyword": cleaned,
+            "ipc_section": ipc_section,
+            "case_category": category,
+            "summary": summary
+        }
+
     except Exception as e:
-        logging.error(f"Error getting IPC section for '{keyword}': {e}")
-        return "General Legal Term"
+        logging.error(f"Error mapping keyword: {e}")
+        return {
+            "keyword": keyword,
+            "ipc_section": "General Legal Term",
+            "case_category": "general",
+            "summary": "No specific section identified."
+        }
+
+
+def build_kanoon_link(ipc_section: str):
+    """
+    Builds Indian Kanoon Search Link
+    """
+    query = ipc_section.replace(" ", "+")
+    return f"https://indiankanoon.org/search/?formInput={query}"
 
 
 def get_case_law_for_keyword(keyword: str) -> Tuple[Dict, str]:
     """
-    Identify IPC section for keyword and create generic IndianKanoon link.
-    Shows ALL cases related to that IPC section.
-    
-    Returns:
-        Tuple of (json_output, ui_output)
+    Identify IPC/Act + Build Kanoon Link + Summary
+    Returns JSON + UI string
     """
-    
-    # Get IPC section for keyword
-    ipc_section = get_ipc_section_for_keyword(keyword)
-    
-    # Determine category based on IPC section
-    if "IPC" in ipc_section:
-        category = "criminal"
-    elif "Contract Act" in ipc_section:
-        category = "civil"
-    elif "Consumer" in ipc_section:
-        category = "consumer"
-    elif "Property" in ipc_section or "Transfer" in ipc_section:
-        category = "property"
-    else:
-        category = "general"
-    
-    # Create generic IndianKanoon search link for the IPC section
-    # This will show ALL cases related to this IPC section
-    search_query = ipc_section.replace(" ", "+")
-    kanoon_link = f"https://indiankanoon.org/search/?formInput={search_query}"
-    
-    # Create summary based on IPC section
-    summary = f"Click the link below to view all Indian court cases involving {ipc_section}. This will show Supreme Court and High Court judgments where this law section was central to the dispute."
-    
-    # Build JSON output
-    json_output = {
-        "keyword": keyword,
-        "ipc_section": ipc_section,
-        "case_category": category,
-        "summary": summary,
-        "search_query": search_query,
-        "kanoon_link": kanoon_link
-    }
-    
-    # Build UI output
-    ui_output = f"""Keyword: {keyword}
-IPC/Law Section: {ipc_section}
-Category: {category.title()}
-Summary: {summary}
-IndianKanoon Link: {kanoon_link}"""
-    
-    logging.info(f"Generated case law link for '{keyword}' → {ipc_section} → {kanoon_link}")
-    
-    return json_output, ui_output
+
+    law_info = get_ipc_section_for_keyword(keyword)
+
+    law_info["search_query"] = law_info["ipc_section"].replace(" ", "+")
+    law_info["kanoon_link"] = build_kanoon_link(law_info["ipc_section"])
+
+    ui_output = f"""Keyword: {law_info['keyword']}
+IPC/Law Section: {law_info['ipc_section']}
+Category: {law_info['case_category'].title()}
+Summary: {law_info['summary']}
+IndianKanoon Link: {law_info['kanoon_link']}"""
+
+    return law_info, ui_output
 
 
 def get_cases_for_keywords(keywords: list) -> Dict[str, Tuple[Dict, str]]:
     """
     Fetch case law links for multiple keywords.
-    
-    Returns:
-        Dict mapping keyword -> (json_output, ui_output)
+    Returns: Dict mapping keyword -> (json_output, ui_output)
     """
+
     if not keywords:
         logging.warning("No keywords provided for case law fetching")
         return {}
-    
+
     results = {}
-    
+
     logging.info(f"Starting case law fetch for {len(keywords)} keywords: {keywords}")
-    
+
     for i, keyword in enumerate(keywords, 1):
         logging.info(f"Processing keyword {i}/{len(keywords)}: {keyword}")
-        
+
         try:
             json_output, ui_output = get_case_law_for_keyword(keyword)
             results[keyword] = (json_output, ui_output)
             logging.info(f"Successfully processed '{keyword}'")
+
         except Exception as e:
             logging.error(f"Failed to process '{keyword}': {e}")
             results[keyword] = (
                 {"keyword": keyword, "error": str(e)},
                 f"Keyword: {keyword}\nError occurred while processing."
             )
-        
-        # Small delay to avoid rate limits
+
         if i < len(keywords):
-            import time
             time.sleep(0.5)
-    
+
     logging.info(f"Case law processing complete. Retrieved {len(results)} results.")
     return results
