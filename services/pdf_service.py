@@ -12,6 +12,8 @@ from modules.vector_store import create_faiss_index
 from modules.highlight_pdf import highlight_paragraphs_in_original_pdf
 from modules.case_law_fetcher import get_cases_for_keywords
 from modules.semantic_importance import analyze_paragraphs_hybrid
+from modules.utils.text_cleaner import normalize_keyword   # ✅ IMPORTANT
+
 
 # -------------------------------
 # JSON SAFE CONVERTER (CRITICAL)
@@ -27,6 +29,7 @@ def to_python(obj):
     else:
         return obj
 
+
 # -------------------------------
 # MODEL INITIALIZATION
 # -------------------------------
@@ -38,10 +41,12 @@ def initialize_models():
     if kw_model is None:
         kw_model = load_legalbert_model()
 
+
 # -------------------------------
 # GLOBAL DOCUMENT STORE
 # -------------------------------
 DOCUMENT_STORE: Dict[str, Dict[str, Any]] = {}
+
 
 # -------------------------------
 # MAIN PDF PROCESSING SERVICE
@@ -75,13 +80,33 @@ def process_pdf_service(pdf_bytes: bytes, filename: str) -> Dict[str, Any]:
         if not text or not text.strip():
             raise ValueError("No extractable text found in PDF")
 
-        keywords = extract_legal_keywords(text, kw_model, top_n=15)
-        meanings = get_keywords_meaning_smart(keywords)
+        # -------------------------------
+        # KEYWORDS + CLEANING
+        # -------------------------------
+        raw_keywords = extract_legal_keywords(text, kw_model, top_n=15)
 
+        cleaned_keywords = []
+        for kw in raw_keywords:
+            clean = normalize_keyword(kw)
+            if clean and clean not in cleaned_keywords:
+                cleaned_keywords.append(clean)
+
+        # -------------------------------
+        # MEANINGS
+        # -------------------------------
+        meanings = get_keywords_meaning_smart(cleaned_keywords)
+
+        # -------------------------------
+        # CASE LAWS (ONLY CLEAN KEYWORDS)
+        # -------------------------------
         case_laws = {}
-        if keywords:
-            case_laws = get_cases_for_keywords(keywords[:5])
+        if cleaned_keywords:
+            laws = get_cases_for_keywords(cleaned_keywords[:5])
+            case_laws = {k: v[0] for k, v in laws.items()}   # remove UI text
 
+        # -------------------------------
+        # PARAGRAPH & IMPORTANCE
+        # -------------------------------
         paragraphs = split_into_paragraphs(text)
         paragraph_data = analyze_paragraphs_hybrid(paragraphs)
 
@@ -95,7 +120,9 @@ def process_pdf_service(pdf_bytes: bytes, filename: str) -> Dict[str, Any]:
         except Exception:
             highlighted_pdf_path = None
 
-        # Metrics
+        # -------------------------------
+        # METRICS
+        # -------------------------------
         high_count = sum(1 for p in paragraph_data if p.get("importance") == "high")
         medium_count = sum(1 for p in paragraph_data if p.get("importance") == "medium")
         low_count = sum(1 for p in paragraph_data if p.get("importance") == "low")
@@ -105,13 +132,15 @@ def process_pdf_service(pdf_bytes: bytes, filename: str) -> Dict[str, Any]:
             "medium_priority": medium_count,
             "low_priority": low_count,
             "total_paragraphs": len(paragraph_data),
-            "total_keywords": len(keywords),
+            "total_keywords": len(cleaned_keywords),
         }
 
-        # Store session
+        # -------------------------------
+        # STORE SESSION
+        # -------------------------------
         DOCUMENT_STORE[session_id] = {
             "text": text,
-            "keywords": keywords,
+            "keywords": cleaned_keywords,
             "meanings": meanings,
             "case_laws": case_laws,
             "paragraph_data": paragraph_data,
@@ -123,11 +152,13 @@ def process_pdf_service(pdf_bytes: bytes, filename: str) -> Dict[str, Any]:
             "metrics": metrics,
         }
 
-        # ✅ JSON-SAFE RESPONSE
+        # -------------------------------
+        # FINAL RESPONSE
+        # -------------------------------
         return to_python({
             "session_id": session_id,
             "message": "Document processed successfully",
-            "keywords": keywords,
+            "keywords": cleaned_keywords,
             "keyword_meanings": meanings,
             "case_laws": case_laws,
             "paragraph_data": paragraph_data,
@@ -142,6 +173,7 @@ def process_pdf_service(pdf_bytes: bytes, filename: str) -> Dict[str, Any]:
             pass
         raise Exception(f"Error processing PDF: {str(e)}")
 
+
 # -------------------------------
 # SESSION HELPERS
 # -------------------------------
@@ -153,6 +185,7 @@ def get_session_data(session_id: str) -> Dict[str, Any]:
         "session_id": session_id,
         **DOCUMENT_STORE[session_id]
     })
+
 
 def delete_session(session_id: str) -> bool:
     if session_id not in DOCUMENT_STORE:
@@ -170,10 +203,12 @@ def delete_session(session_id: str) -> bool:
     del DOCUMENT_STORE[session_id]
     return True
 
+
 def get_highlighted_pdf_path(session_id: str) -> str:
     if session_id not in DOCUMENT_STORE:
         raise ValueError("Session not found")
     return DOCUMENT_STORE[session_id]["highlighted_pdf_path"]
+
 
 def get_keywords_text(session_id: str) -> str:
     if session_id not in DOCUMENT_STORE:
@@ -184,6 +219,7 @@ def get_keywords_text(session_id: str) -> str:
         f"{kw}: {data['meanings'].get(kw, 'No meaning available')}"
         for kw in data["keywords"]
     )
+
 
 def get_raw_text(session_id: str) -> str:
     if session_id not in DOCUMENT_STORE:
